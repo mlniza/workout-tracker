@@ -55,6 +55,9 @@
 </head>
 <body>
   <div class="container">
+    <!-- Fatigue signal banners -->
+    <div class="fatigue-container" id="fatigueContainer" style="display:none;"></div>
+
     <div class="page-header">
       <div>
         <h1 class="page-header__title">DASH<span>BOARD</span></h1>
@@ -86,6 +89,9 @@
         <div class="metric__sub">kg terkini</div>
       </div>
     </div>
+
+    <!-- Workout Heatmap Calendar -->
+    <div id="heatmapContainer" style="position:relative;"></div>
 
     <!-- AI Analysis bar -->
     <div class="ai-bar">
@@ -121,13 +127,28 @@
       </div>
       <div class="chart-card">
         <div class="chart-card__header">
-          <span class="chart-card__title">Progress Exercise</span>
-          <select class="form-select" id="progressExercise" style="width:160px;font-size:0.8rem;padding:0.35rem 0.6rem;">
-            <option value="">Pilih exercise...</option>
+          <span class="chart-card__title">Muscle Balance</span>
+          <select class="form-select" id="radarPeriod" style="width:140px;font-size:0.8rem;padding:0.35rem 0.6rem;">
+            <option value="30">30 hari</option>
+            <option value="7">7 hari</option>
+            <option value="90">3 bulan</option>
+            <option value="0">Semua waktu</option>
           </select>
         </div>
-        <canvas id="progressChart" height="200"></canvas>
+        <canvas id="radarChart" height="240"></canvas>
+        <div class="muscle-recs" id="muscleRecs"></div>
       </div>
+    </div>
+
+    <!-- Progress exercise chart -->
+    <div class="chart-card" style="margin-bottom:1.25rem;">
+      <div class="chart-card__header">
+        <span class="chart-card__title">Progress Exercise</span>
+        <select class="form-select" id="progressExercise" style="width:160px;font-size:0.8rem;padding:0.35rem 0.6rem;">
+          <option value="">Pilih exercise...</option>
+        </select>
+      </div>
+      <canvas id="progressChart" height="200"></canvas>
     </div>
 
     <!-- Body weight chart -->
@@ -146,6 +167,14 @@
     import { renderNavbar } from './js/navbar.js'
     import { showToast }  from './js/toast.js'
     import { getAIRecommendation } from './js/ai.js'
+    import { detectFatigueSignals, buildFatiguePromptText } from './js/fatigue.js'
+    import {
+      renderHeatmap,
+      calculateMuscleBalance,
+      renderRadarChart,
+      renderMuscleRecommendations,
+      renderFatigueBanners
+    } from './js/dashboard.js'
 
     renderNavbar()
     const session = await requireAuth()
@@ -163,6 +192,10 @@
     ])
     const allSessions = sessions || []
     const allBody     = bodyLogs  || []
+
+    // ── Fatigue Signals
+    const fatigueSignals = detectFatigueSignals(allSessions)
+    renderFatigueBanners(document.getElementById('fatigueContainer'), fatigueSignals)
 
     // ── Metric cards
     const uniqueDates = [...new Set(allSessions.map(s => s.session_date))]
@@ -186,6 +219,9 @@
       document.getElementById('mBerat').textContent = '—'
     }
 
+    // ── Heatmap Calendar
+    renderHeatmap(document.getElementById('heatmapContainer'), allSessions)
+
     // ── Volume weekly chart
     const weekLabels = [], weekVolumes = []
     for (let i = 7; i >= 0; i--) {
@@ -203,17 +239,40 @@
       type: 'bar',
       data: {
         labels: weekLabels,
-        datasets: [{ label: 'Volume (kg)', data: weekVolumes, backgroundColor: '#FF1E1E', borderRadius: 4 }]
+        datasets: [{ label: 'Volume (kg)', data: weekVolumes, backgroundColor: '#E63030', borderRadius: 4 }]
       },
       options: {
         responsive: true,
         plugins: { legend: { display: false } },
         scales: {
-          y: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 11 } } },
-          x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', font: { size: 11 } } },
+          x: { grid: { display: false }, ticks: { color: '#888', font: { size: 10 } } }
         }
       }
     })
+
+    // ── Radar Chart — Muscle Balance
+    let radarChartInstance = null
+    function updateRadarChart(days) {
+      let filtered = allSessions
+      if (days > 0) {
+        const cutoff = new Date(now)
+        cutoff.setDate(cutoff.getDate() - days)
+        const cutoffStr = cutoff.toISOString().split('T')[0]
+        filtered = allSessions.filter(s => s.session_date >= cutoffStr)
+      }
+
+      const { scores, volumes, frequencies, recommendations } = calculateMuscleBalance(filtered)
+
+      if (radarChartInstance) radarChartInstance.destroy()
+      radarChartInstance = renderRadarChart('radarChart', scores, volumes, frequencies)
+      renderMuscleRecommendations(document.getElementById('muscleRecs'), recommendations)
+    }
+
+    document.getElementById('radarPeriod').addEventListener('change', (e) => {
+      updateRadarChart(parseInt(e.target.value))
+    })
+    updateRadarChart(30) // default: 30 days
 
     // ── Progress exercise chart
     const exNames = [...new Set(allSessions.map(s => s.exercise_name))].sort()
@@ -241,10 +300,10 @@
           datasets: [{
             label: `${exName} — max kg`,
             data: values,
-            borderColor: '#FF1E1E',
-            backgroundColor: 'rgba(255,30,30,0.07)',
+            borderColor: '#E63030',
+            backgroundColor: 'rgba(230,48,48,0.07)',
             borderWidth: 2.5,
-            pointBackgroundColor: '#FF1E1E',
+            pointBackgroundColor: '#E63030',
             pointRadius: 4,
             tension: 0.3,
             fill: true
@@ -254,8 +313,8 @@
           responsive: true,
           plugins: { legend: { display: false } },
           scales: {
-            y: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 11 } } },
-            x: { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 8 } }
+            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', font: { size: 11 } } },
+            x: { grid: { display: false }, ticks: { color: '#888', font: { size: 10 }, maxTicksLimit: 8 } }
           }
         }
       })
@@ -274,17 +333,17 @@
           labels: bodySorted.map(l => new Date(l.logged_date + 'T00:00:00').toLocaleDateString('id-ID', { day:'numeric', month:'short' })),
           datasets: [{
             data: bodySorted.map(l => parseFloat(l.weight_kg)),
-            borderColor: '#0D0D0D',
-            backgroundColor: 'rgba(13,13,13,0.05)',
-            borderWidth: 2, pointBackgroundColor: '#0D0D0D', pointRadius: 3, tension: 0.3, fill: true
+            borderColor: '#E63030',
+            backgroundColor: 'rgba(230,48,48,0.07)',
+            borderWidth: 2, pointBackgroundColor: '#E63030', pointRadius: 3, tension: 0.3, fill: true
           }]
         },
         options: {
           responsive: true,
           plugins: { legend: { display: false } },
           scales: {
-            y: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 11 } } },
-            x: { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 8 } }
+            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', font: { size: 11 } } },
+            x: { grid: { display: false }, ticks: { color: '#888', font: { size: 10 }, maxTicksLimit: 8 } }
           }
         }
       })
@@ -293,7 +352,7 @@
         `<p style="text-align:center;color:var(--text-muted);font-size:0.85rem;padding:1rem;">Belum ada data berat badan. <a href="/body.html" style="color:var(--red);">Catat sekarang</a></p>`
     }
 
-    // ── AI Analysis
+    // ── AI Analysis (with fatigue signals integration)
     document.getElementById('analyzeBtn').addEventListener('click', async () => {
       const btn = document.getElementById('analyzeBtn')
       const days = parseInt(document.getElementById('aiPeriod').value)
@@ -309,7 +368,10 @@
         const periodBody = allBody.filter(l => l.logged_date >= cutoffStr)
         const period = `${cutoffStr} sampai ${now.toISOString().split('T')[0]}`
 
-        const result = await getAIRecommendation(periodSessions, periodBody, period)
+        // Include fatigue signals in AI analysis
+        const fatigueText = buildFatiguePromptText(fatigueSignals)
+
+        const result = await getAIRecommendation(periodSessions, periodBody, period, fatigueText)
         renderAIResult(result)
       } catch (err) {
         showToast('Gagal analisis: ' + err.message, 'error')

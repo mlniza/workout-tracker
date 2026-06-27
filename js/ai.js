@@ -22,7 +22,7 @@ const PROVIDERS = {
 }
 
 // ── Build prompt dari data workout
-export function buildPrompt(workoutData, bodyWeightData, period) {
+export function buildPrompt(workoutData, bodyWeightData, period, fatigueText = '') {
   return `
 Analisis data latihan berikut untuk periode ${period}:
 
@@ -31,15 +31,15 @@ ${JSON.stringify(workoutData, null, 2)}
 
 === DATA BERAT BADAN ===
 ${JSON.stringify(bodyWeightData, null, 2)}
-
+${fatigueText}
 Berikan analisis lengkap sesuai format JSON yang sudah ditentukan.
   `.trim()
 }
 
 // ── Main function — panggil via Supabase Edge Function
 // (API key disimpan aman di server, bukan di sini)
-export async function getAIRecommendation(workoutData, bodyWeightData, period) {
-  const prompt = buildPrompt(workoutData, bodyWeightData, period)
+export async function getAIRecommendation(workoutData, bodyWeightData, period, fatigueText = '') {
+  const prompt = buildPrompt(workoutData, bodyWeightData, period, fatigueText)
 
   // Request ke Supabase Edge Function (middleware aman)
   const response = await fetch('/api/analyze', {

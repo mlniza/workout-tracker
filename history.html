@@ -78,11 +78,20 @@
     await initNavbar('history')
     const userId = getUserId(session)
 
-    // ── Default date range: last 30 days
+    // ── Default date range: last 30 days (or from URL param)
     const today = new Date()
-    const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30)
-    document.getElementById('filterFrom').value = monthAgo.toISOString().split('T')[0]
-    document.getElementById('filterTo').value   = today.toISOString().split('T')[0]
+    const urlParams = new URLSearchParams(window.location.search)
+    const dateParam = urlParams.get('date')
+
+    if (dateParam) {
+      // Coming from heatmap click — show single day
+      document.getElementById('filterFrom').value = dateParam
+      document.getElementById('filterTo').value   = dateParam
+    } else {
+      const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30)
+      document.getElementById('filterFrom').value = monthAgo.toISOString().split('T')[0]
+      document.getElementById('filterTo').value   = today.toISOString().split('T')[0]
+    }
 
     // ── Load all exercise names for filter dropdown
     const { data: exercises } = await supabase
@@ -232,8 +241,9 @@
     // ── Filter controls
     document.getElementById('applyFilter').addEventListener('click', loadSessions)
     document.getElementById('clearFilter').addEventListener('click', () => {
-      document.getElementById('filterFrom').value = monthAgo.toISOString().split('T')[0]
-      document.getElementById('filterTo').value   = today.toISOString().split('T')[0]
+      const resetFrom = new Date(); resetFrom.setDate(resetFrom.getDate() - 30)
+      document.getElementById('filterFrom').value = resetFrom.toISOString().split('T')[0]
+      document.getElementById('filterTo').value   = new Date().toISOString().split('T')[0]
       document.getElementById('filterExercise').value = ''
       loadSessions()
     })
