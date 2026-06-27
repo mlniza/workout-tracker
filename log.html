@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Log Sesi — Workout Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .log-card { max-width: 760px; }
+    .exercise-meta { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+    .set-actions { display: flex; align-items: center; gap: 0.75rem; margin-top: 1rem; }
+    .set-table-wrap { overflow-x: auto; }
+    .no-sets { padding: 1.25rem; text-align: center; color: var(--text-muted); font-size: 0.875rem; }
+    .submit-area { display: flex; gap: 1rem; align-items: center; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border); flex-wrap: wrap; }
+    .submit-area .btn { min-width: 160px; justify-content: center; }
+    .session-count { font-size: 0.8rem; color: var(--text-secondary); }
+    .saved-exercises { margin-top: 2rem; }
+    .saved-ex-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; }
+    .saved-ex-item {
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--gray-50); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 0.65rem 1rem;
+      font-size: 0.875rem;
+    }
+    .saved-ex-item strong { color: var(--black); }
+    .saved-ex-item span { color: var(--text-secondary); font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-header__title">LOG <span>SESI</span></h1>
+        <p class="page-header__sub" id="sessionSub">Catat workout hari ini</p>
+      </div>
+    </div>
+
+    <div class="card log-card">
+      <!-- Date picker -->
+      <div class="form-group">
+        <label class="form-label" for="sessionDate">Tanggal Sesi</label>
+        <input class="form-input" type="date" id="sessionDate" style="max-width:220px;">
+      </div>
+
+      <hr class="divider">
+
+      <!-- Exercise search -->
+      <div class="form-group">
+        <label class="form-label">Exercise</label>
+        <div class="search-wrap">
+          <input class="form-input" type="text" id="exerciseSearch" placeholder="Cari exercise... (e.g. Bench Press)" autocomplete="off">
+          <div class="dropdown-list" id="exerciseDropdown"></div>
+        </div>
+        <p class="form-hint">Ketik untuk mencari dari library. Tidak ada? <a href="/exercises.html" style="color:var(--red);">Tambah custom</a>.</p>
+      </div>
+
+      <div class="exercise-meta" id="exerciseMeta" style="display:none;">
+        <span class="badge badge--black" id="metaCategory"></span>
+        <span class="badge badge--gray"  id="metaMuscle"></span>
+        <span class="badge badge--gray"  id="metaEquipment"></span>
+      </div>
+
+      <!-- Set table -->
+      <div class="set-table-wrap">
+        <table class="set-table" id="setTable">
+          <thead>
+            <tr>
+              <th>SET</th>
+              <th>REPS</th>
+              <th>BERAT (KG)</th>
+              <th>CATATAN</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="setBody">
+            <tr><td colspan="5" class="no-sets">Pilih exercise terlebih dahulu</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="set-actions">
+        <button class="btn btn--outline btn--sm" id="addSetBtn" disabled>+ Tambah Set</button>
+        <span class="session-count" id="setCount"></span>
+      </div>
+
+      <div class="submit-area">
+        <button class="btn btn--primary" id="saveExBtn" disabled>Simpan Exercise Ini</button>
+        <button class="btn btn--ghost" id="resetBtn">Reset Form</button>
+      </div>
+    </div>
+
+    <!-- Saved exercises in this session -->
+    <div class="saved-exercises" id="savedSection" style="display:none;">
+      <h3 style="font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:0.75rem;">
+        SUDAH DICATAT HARI INI
+      </h3>
+      <div class="saved-ex-list" id="savedList"></div>
+      <div style="margin-top:1.25rem;">
+        <a href="/history.html" class="btn btn--black btn--sm">Lihat Semua Riwayat →</a>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase }   from './js/supabase.js'
+    import { requireAuth, initNavbar, getUserId } from './js/auth.js'
+    import { renderNavbar } from './js/navbar.js'
+    import { showToast }  from './js/toast.js'
+
+    renderNavbar()
+    const session = await requireAuth()
+    await initNavbar('log')
+    const userId = getUserId(session)
+
+    // ── Set today's date
+    const dateEl = document.getElementById('sessionDate')
+    dateEl.value = new Date().toISOString().split('T')[0]
+    document.getElementById('sessionSub').textContent =
+      `Sesi: ${new Date().toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}`
+
+    // ── Load exercises
+    const { data: exercises } = await supabase.from('exercises').select('*').order('category')
+    let selectedExercise = null
+    let setRows = []
+
+    // ── Search dropdown
+    const searchEl  = document.getElementById('exerciseSearch')
+    const dropdown  = document.getElementById('exerciseDropdown')
+
+    searchEl.addEventListener('input', () => {
+      const q = searchEl.value.toLowerCase().trim()
+      if (!q) { dropdown.classList.remove('open'); return }
+      const matches = exercises.filter(e =>
+        e.name.toLowerCase().includes(q) || e.category.toLowerCase().includes(q)
+      ).slice(0, 8)
+      dropdown.innerHTML = matches.length
+        ? matches.map(e => `
+            <div class="dropdown-item" data-id="${e.id}">
+              <span>${e.name}</span>
+              <span class="dropdown-item__cat">${e.category}</span>
+            </div>`).join('')
+        : '<div class="dropdown-item" style="color:var(--text-muted);">Tidak ditemukan</div>'
+      dropdown.classList.add('open')
+    })
+
+    dropdown.addEventListener('click', e => {
+      const item = e.target.closest('.dropdown-item[data-id]')
+      if (!item) return
+      selectedExercise = exercises.find(ex => ex.id === item.dataset.id)
+      searchEl.value = selectedExercise.name
+      dropdown.classList.remove('open')
+      renderExerciseMeta()
+      setRows = [{ reps: '', weight: '', notes: '' }]
+      renderSetTable()
+      document.getElementById('addSetBtn').disabled = false
+      document.getElementById('saveExBtn').disabled = false
+    })
+
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.search-wrap')) dropdown.classList.remove('open')
+    })
+
+    // ── Exercise meta badges
+    function renderExerciseMeta() {
+      if (!selectedExercise) return
+      document.getElementById('exerciseMeta').style.display = 'flex'
+      document.getElementById('metaCategory').textContent  = selectedExercise.category
+      document.getElementById('metaMuscle').textContent    = selectedExercise.muscle_group
+      document.getElementById('metaEquipment').textContent = selectedExercise.equipment || 'Bodyweight'
+    }
+
+    // ── Set table
+    function renderSetTable() {
+      const tbody = document.getElementById('setBody')
+      tbody.innerHTML = setRows.map((row, i) => `
+        <tr data-idx="${i}">
+          <td><span class="set-num">${i + 1}</span></td>
+          <td><input type="number" class="form-input reps-input" min="1" value="${row.reps}" placeholder="0"></td>
+          <td><input type="number" class="form-input weight-input" min="0" step="0.5" value="${row.weight}" placeholder="0"></td>
+          <td><input type="text" class="form-input notes-input" value="${row.notes}" placeholder="Opsional..."></td>
+          <td><button class="btn btn--ghost btn--sm remove-set" title="Hapus set">×</button></td>
+        </tr>`).join('')
+      document.getElementById('setCount').textContent = `${setRows.length} set`
+
+      // Sync inputs to setRows
+      tbody.querySelectorAll('tr').forEach(tr => {
+        const idx = +tr.dataset.idx
+        tr.querySelector('.reps-input').addEventListener('input',   e => { setRows[idx].reps   = e.target.value })
+        tr.querySelector('.weight-input').addEventListener('input', e => { setRows[idx].weight = e.target.value })
+        tr.querySelector('.notes-input').addEventListener('input',  e => { setRows[idx].notes  = e.target.value })
+        tr.querySelector('.remove-set').addEventListener('click',   () => {
+          if (setRows.length === 1) return
+          setRows.splice(idx, 1)
+          renderSetTable()
+        })
+      })
+    }
+
+    document.getElementById('addSetBtn').addEventListener('click', () => {
+      setRows.push({ reps: '', weight: '', notes: '' })
+      renderSetTable()
+    })
+
+    // ── Save exercise to Supabase
+    const savedExercises = []
+
+    document.getElementById('saveExBtn').addEventListener('click', async () => {
+      if (!selectedExercise) return showToast('Pilih exercise dulu', 'error')
+      const date = dateEl.value
+      if (!date) return showToast('Pilih tanggal sesi', 'error')
+
+      const validSets = setRows.filter(r => r.reps && r.weight !== '')
+      if (!validSets.length) return showToast('Isi minimal 1 set (reps & berat)', 'error')
+
+      const records = validSets.map((r, i) => ({
+        user_id:       userId,
+        session_date:  date,
+        exercise_id:   selectedExercise.id,
+        exercise_name: selectedExercise.name,
+        set_number:    i + 1,
+        reps:          parseInt(r.reps),
+        weight_kg:     parseFloat(r.weight),
+        notes:         r.notes || null
+      }))
+
+      const { error } = await supabase.from('workout_sessions').insert(records)
+      if (error) return showToast('Gagal menyimpan: ' + error.message, 'error')
+
+      showToast(`${selectedExercise.name} — ${validSets.length} set tersimpan!`)
+      savedExercises.push({ name: selectedExercise.name, sets: validSets.length, date })
+      renderSavedList()
+      resetForm()
+    })
+
+    function renderSavedList() {
+      document.getElementById('savedSection').style.display = 'block'
+      document.getElementById('savedList').innerHTML = savedExercises.map(ex => `
+        <div class="saved-ex-item">
+          <strong>${ex.name}</strong>
+          <span>${ex.sets} set · ${ex.date}</span>
+        </div>`).join('')
+    }
+
+    function resetForm() {
+      selectedExercise = null
+      setRows = []
+      searchEl.value = ''
+      document.getElementById('exerciseMeta').style.display = 'none'
+      document.getElementById('setBody').innerHTML = '<tr><td colspan="5" class="no-sets">Pilih exercise terlebih dahulu</td></tr>'
+      document.getElementById('addSetBtn').disabled = true
+      document.getElementById('saveExBtn').disabled = true
+      document.getElementById('setCount').textContent = ''
+    }
+
+    document.getElementById('resetBtn').addEventListener('click', resetForm)
+  </script>
+</body>
+</html>

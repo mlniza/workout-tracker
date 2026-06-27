@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — Workout Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    .ai-bar {
+      background: var(--black);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+    .ai-bar__left { display: flex; align-items: center; gap: 1rem; }
+    .ai-bar__icon { font-size: 1.5rem; }
+    .ai-bar__title { font-family: var(--font-display); font-size: 1.2rem; color: var(--white); letter-spacing: 0.04em; }
+    .ai-bar__sub { font-size: 0.75rem; color: var(--gray-500); margin-top: 0.15rem; }
+    .ai-bar__controls { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    .ai-bar select { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.12); color: var(--white); font-size: 0.8rem; padding: 0.4rem 0.7rem; }
+    .ai-bar select option { background: var(--black); }
+    .ai-result { margin-bottom: 2rem; }
+    .ai-summary {
+      background: var(--gray-50); border: 1px solid var(--border);
+      border-left: 3px solid var(--red); border-radius: var(--radius-lg);
+      padding: 1.25rem 1.5rem; margin-bottom: 1rem; font-size: 0.9rem; line-height: 1.6;
+    }
+    .ai-stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+    .ai-stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 1rem; }
+    .ai-stat__label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-secondary); margin-bottom: 0.35rem; }
+    .ai-stat__val { font-family: var(--font-display); font-size: 1.6rem; color: var(--black); }
+    .progress-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; }
+    .progress-item { display: flex; align-items: center; gap: 0.75rem; font-size: 0.875rem; padding: 0.6rem 0.9rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+    .progress-item__name { flex: 1; font-weight: 500; }
+    .rec-list { display: flex; flex-direction: column; gap: 0.6rem; }
+    .rec-item { display: flex; gap: 0.75rem; padding: 0.85rem 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+    .rec-item__body { flex: 1; }
+    .rec-item__aksi { font-size: 0.875rem; font-weight: 600; margin-bottom: 0.2rem; }
+    .rec-item__alasan { font-size: 0.775rem; color: var(--text-secondary); }
+    .focus-box { background: var(--black); color: var(--white); border-radius: var(--radius-lg); padding: 1.25rem 1.5rem; margin-top: 1rem; }
+    .focus-box__label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--red); margin-bottom: 0.5rem; }
+    .focus-box__text { font-size: 0.9rem; line-height: 1.6; }
+    .status-naik   { color: #22C55E; }
+    .status-turun  { color: var(--red); }
+    .status-plateau{ color: #F59E0B; }
+    .status-baru   { color: #60A5FA; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-header__title">DASH<span>BOARD</span></h1>
+        <p class="page-header__sub" id="dashSub">Selamat datang kembali</p>
+      </div>
+      <a href="/log.html" class="btn btn--primary">+ Log Sesi</a>
+    </div>
+
+    <!-- Metric cards -->
+    <div class="metrics">
+      <div class="metric">
+        <div class="metric__label">Total Sesi</div>
+        <div class="metric__value metric__value--red" id="mTotalSesi">—</div>
+        <div class="metric__sub">semua waktu</div>
+      </div>
+      <div class="metric">
+        <div class="metric__label">Sesi Bulan Ini</div>
+        <div class="metric__value" id="mBulanIni">—</div>
+        <div class="metric__sub" id="mBulanSub">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric__label">Volume Minggu Ini</div>
+        <div class="metric__value" id="mVolume">—</div>
+        <div class="metric__sub">kg total</div>
+      </div>
+      <div class="metric">
+        <div class="metric__label">Berat Badan</div>
+        <div class="metric__value" id="mBerat">—</div>
+        <div class="metric__sub">kg terkini</div>
+      </div>
+    </div>
+
+    <!-- AI Analysis bar -->
+    <div class="ai-bar">
+      <div class="ai-bar__left">
+        <div class="ai-bar__icon">🤖</div>
+        <div>
+          <div class="ai-bar__title">ANALISIS AI</div>
+          <div class="ai-bar__sub">Rekomendasi berbasis data latihanmu</div>
+        </div>
+      </div>
+      <div class="ai-bar__controls">
+        <select class="form-select" id="aiPeriod">
+          <option value="30">30 hari terakhir</option>
+          <option value="14">14 hari terakhir</option>
+          <option value="7">7 hari terakhir</option>
+          <option value="60">60 hari terakhir</option>
+          <option value="90">90 hari terakhir</option>
+        </select>
+        <button class="btn btn--primary" id="analyzeBtn">Analisis Sekarang</button>
+      </div>
+    </div>
+
+    <!-- AI Result (hidden until analyzed) -->
+    <div class="ai-result" id="aiResult" style="display:none;"></div>
+
+    <!-- Charts -->
+    <div class="charts">
+      <div class="chart-card">
+        <div class="chart-card__header">
+          <span class="chart-card__title">Volume Mingguan</span>
+          <span style="font-size:0.75rem;color:var(--text-muted);">8 minggu terakhir</span>
+        </div>
+        <canvas id="volumeChart" height="200"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card__header">
+          <span class="chart-card__title">Progress Exercise</span>
+          <select class="form-select" id="progressExercise" style="width:160px;font-size:0.8rem;padding:0.35rem 0.6rem;">
+            <option value="">Pilih exercise...</option>
+          </select>
+        </div>
+        <canvas id="progressChart" height="200"></canvas>
+      </div>
+    </div>
+
+    <!-- Body weight chart -->
+    <div class="chart-card" style="margin-bottom:2rem;">
+      <div class="chart-card__header">
+        <span class="chart-card__title">Tren Berat Badan</span>
+        <a href="/body.html" style="font-size:0.775rem;color:var(--red);">Catat berat →</a>
+      </div>
+      <canvas id="bodyChart" height="140"></canvas>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase }   from './js/supabase.js'
+    import { requireAuth, initNavbar, getUserId } from './js/auth.js'
+    import { renderNavbar } from './js/navbar.js'
+    import { showToast }  from './js/toast.js'
+    import { getAIRecommendation } from './js/ai.js'
+
+    renderNavbar()
+    const session = await requireAuth()
+    await initNavbar('dashboard')
+    const userId = getUserId(session)
+
+    const now   = new Date()
+    document.getElementById('dashSub').textContent =
+      now.toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' })
+
+    // ── Load all data
+    const [{ data: sessions }, { data: bodyLogs }] = await Promise.all([
+      supabase.from('workout_sessions').select('*').eq('user_id', userId).order('session_date', { ascending: false }),
+      supabase.from('body_weight_logs').select('*').eq('user_id', userId).order('logged_date', { ascending: false })
+    ])
+    const allSessions = sessions || []
+    const allBody     = bodyLogs  || []
+
+    // ── Metric cards
+    const uniqueDates = [...new Set(allSessions.map(s => s.session_date))]
+    document.getElementById('mTotalSesi').textContent = uniqueDates.length
+
+    const thisMonth = now.toISOString().slice(0, 7)
+    const monthSessions = [...new Set(allSessions.filter(s => s.session_date.startsWith(thisMonth)).map(s => s.session_date))]
+    document.getElementById('mBulanIni').textContent = monthSessions.length
+    document.getElementById('mBulanSub').textContent = now.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
+
+    const weekStart = new Date(now); weekStart.setDate(weekStart.getDate() - weekStart.getDay())
+    const weekStr   = weekStart.toISOString().split('T')[0]
+    const weekVol   = allSessions
+      .filter(s => s.session_date >= weekStr)
+      .reduce((sum, s) => sum + s.reps * parseFloat(s.weight_kg), 0)
+    document.getElementById('mVolume').textContent = weekVol.toLocaleString('id-ID')
+
+    if (allBody.length) {
+      document.getElementById('mBerat').textContent = parseFloat(allBody[0].weight_kg).toFixed(1)
+    } else {
+      document.getElementById('mBerat').textContent = '—'
+    }
+
+    // ── Volume weekly chart
+    const weekLabels = [], weekVolumes = []
+    for (let i = 7; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(d.getDate() - i * 7)
+      const wStart = new Date(d); wStart.setDate(wStart.getDate() - wStart.getDay())
+      const wEnd   = new Date(wStart); wEnd.setDate(wEnd.getDate() + 6)
+      const ws = wStart.toISOString().split('T')[0]
+      const we = wEnd.toISOString().split('T')[0]
+      weekLabels.push(`W${wStart.toLocaleDateString('id-ID', { day:'numeric', month:'short' })}`)
+      weekVolumes.push(allSessions.filter(s => s.session_date >= ws && s.session_date <= we)
+        .reduce((sum, s) => sum + s.reps * parseFloat(s.weight_kg), 0))
+    }
+    new Chart(document.getElementById('volumeChart').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: weekLabels,
+        datasets: [{ label: 'Volume (kg)', data: weekVolumes, backgroundColor: '#FF1E1E', borderRadius: 4 }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 11 } } },
+          x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+        }
+      }
+    })
+
+    // ── Progress exercise chart
+    const exNames = [...new Set(allSessions.map(s => s.exercise_name))].sort()
+    const exSelect = document.getElementById('progressExercise')
+    exNames.forEach(n => { const o = document.createElement('option'); o.value = o.textContent = n; exSelect.appendChild(o) })
+
+    let progressChart = null
+    function renderProgressChart(exName) {
+      const exData = allSessions
+        .filter(s => s.exercise_name === exName)
+        .reduce((acc, s) => {
+          if (!acc[s.session_date] || parseFloat(s.weight_kg) > acc[s.session_date])
+            acc[s.session_date] = parseFloat(s.weight_kg)
+          return acc
+        }, {})
+      const dates  = Object.keys(exData).sort()
+      const labels = dates.map(d => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day:'numeric', month:'short' }))
+      const values = dates.map(d => exData[d])
+
+      if (progressChart) progressChart.destroy()
+      progressChart = new Chart(document.getElementById('progressChart').getContext('2d'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: `${exName} — max kg`,
+            data: values,
+            borderColor: '#FF1E1E',
+            backgroundColor: 'rgba(255,30,30,0.07)',
+            borderWidth: 2.5,
+            pointBackgroundColor: '#FF1E1E',
+            pointRadius: 4,
+            tension: 0.3,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 11 } } },
+            x: { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 8 } }
+          }
+        }
+      })
+    }
+
+    exSelect.addEventListener('change', () => { if (exSelect.value) renderProgressChart(exSelect.value) })
+    if (exNames.length) { exSelect.value = exNames[0]; renderProgressChart(exNames[0]) }
+
+    // ── Body weight chart
+    const bodyChart = document.getElementById('bodyChart').getContext('2d')
+    if (allBody.length) {
+      const bodySorted = [...allBody].sort((a, b) => a.logged_date.localeCompare(b.logged_date)).slice(-30)
+      new Chart(bodyChart, {
+        type: 'line',
+        data: {
+          labels: bodySorted.map(l => new Date(l.logged_date + 'T00:00:00').toLocaleDateString('id-ID', { day:'numeric', month:'short' })),
+          datasets: [{
+            data: bodySorted.map(l => parseFloat(l.weight_kg)),
+            borderColor: '#0D0D0D',
+            backgroundColor: 'rgba(13,13,13,0.05)',
+            borderWidth: 2, pointBackgroundColor: '#0D0D0D', pointRadius: 3, tension: 0.3, fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 11 } } },
+            x: { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 8 } }
+          }
+        }
+      })
+    } else {
+      document.getElementById('bodyChart').parentElement.innerHTML +=
+        `<p style="text-align:center;color:var(--text-muted);font-size:0.85rem;padding:1rem;">Belum ada data berat badan. <a href="/body.html" style="color:var(--red);">Catat sekarang</a></p>`
+    }
+
+    // ── AI Analysis
+    document.getElementById('analyzeBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('analyzeBtn')
+      const days = parseInt(document.getElementById('aiPeriod').value)
+      const cutoff = new Date(now); cutoff.setDate(cutoff.getDate() - days)
+      const cutoffStr = cutoff.toISOString().split('T')[0]
+
+      btn.disabled = true
+      btn.textContent = 'Menganalisis...'
+
+      try {
+        // Prepare workout data
+        const periodSessions = allSessions.filter(s => s.session_date >= cutoffStr)
+        const periodBody = allBody.filter(l => l.logged_date >= cutoffStr)
+        const period = `${cutoffStr} sampai ${now.toISOString().split('T')[0]}`
+
+        const result = await getAIRecommendation(periodSessions, periodBody, period)
+        renderAIResult(result)
+      } catch (err) {
+        showToast('Gagal analisis: ' + err.message, 'error')
+      } finally {
+        btn.disabled = false
+        btn.textContent = 'Analisis Sekarang'
+      }
+    })
+
+    function renderAIResult(r) {
+      const statusIcon = { naik: '📈', turun: '📉', plateau: '➡️', baru: '🆕' }
+      const statusClass = { naik: 'status-naik', turun: 'status-turun', plateau: 'status-plateau', baru: 'status-baru' }
+      const priorityClass = { tinggi: 'priority-high', sedang: 'priority-medium', rendah: '' }
+
+      document.getElementById('aiResult').style.display = 'block'
+      document.getElementById('aiResult').innerHTML = `
+        <div class="ai-summary">${r.ringkasan}</div>
+
+        <div class="ai-stats-row">
+          <div class="ai-stat"><div class="ai-stat__label">Total Sesi</div><div class="ai-stat__val">${r.statistik.total_sesi}</div></div>
+          <div class="ai-stat"><div class="ai-stat__label">Total Volume</div><div class="ai-stat__val">${r.statistik.total_volume_kg.toLocaleString('id-ID')}</div></div>
+          <div class="ai-stat"><div class="ai-stat__label">Frekuensi</div><div class="ai-stat__val" style="font-size:1.1rem;padding-top:0.25rem;">${r.statistik.rata_frekuensi}</div></div>
+          <div class="ai-stat"><div class="ai-stat__label">Konsistensi</div><div class="ai-stat__val metric__value--red">${r.statistik.skor_konsistensi}</div></div>
+        </div>
+
+        <div class="charts" style="margin-bottom:1rem;">
+          <div class="card">
+            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-secondary);margin-bottom:0.75rem;">
+              ✅ YANG BERJALAN BAIK
+            </div>
+            <div class="ai-card ai-card--positive" style="border-radius:var(--radius);padding:1rem;">
+              <ul>${(r.positif || []).map(p => `<li>${p}</li>`).join('')}</ul>
+            </div>
+          </div>
+          <div class="card">
+            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-secondary);margin-bottom:0.75rem;">
+              ⚠️ PERLU PERHATIAN
+            </div>
+            <div class="ai-card ai-card--warning" style="border-radius:var(--radius);padding:1rem;">
+              <ul>${(r.perhatian || []).map(p => `<li>${p}</li>`).join('')}</ul>
+            </div>
+          </div>
+        </div>
+
+        ${r.progress_exercise?.length ? `
+        <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-secondary);margin-bottom:0.5rem;">PROGRESS EXERCISE</div>
+        <div class="progress-list">
+          ${r.progress_exercise.map(ex => `
+            <div class="progress-item">
+              <span>${statusIcon[ex.status] || '•'}</span>
+              <span class="progress-item__name">${ex.nama}</span>
+              <span class="badge badge--gray ${statusClass[ex.status]}">${ex.status}</span>
+              <span style="font-size:0.775rem;color:var(--text-secondary);flex:2;">${ex.catatan}</span>
+            </div>`).join('')}
+        </div>` : ''}
+
+        <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-secondary);margin:1rem 0 0.5rem;">REKOMENDASI</div>
+        <div class="rec-list">
+          ${(r.rekomendasi || []).map(rec => `
+            <div class="rec-item">
+              <span class="badge badge--${rec.prioritas === 'tinggi' ? 'red' : 'gray'}" style="white-space:nowrap;align-self:flex-start;">${rec.prioritas}</span>
+              <div class="rec-item__body">
+                <div class="rec-item__aksi ${priorityClass[rec.prioritas]}">${rec.aksi}</div>
+                <div class="rec-item__alasan">${rec.alasan}</div>
+              </div>
+            </div>`).join('')}
+        </div>
+
+        <div class="focus-box">
+          <div class="focus-box__label">🎯 FOKUS MINGGU DEPAN</div>
+          <div class="focus-box__text">${r.fokus_minggu_depan}</div>
+        </div>
+      `
+
+      document.getElementById('aiResult').scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  </script>
+</body>
+</html>

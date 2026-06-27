@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/api/analyze", "destination": "sb_publishable_2h_ldtFGo6PPXAZwvVqkVw_kf5zcYPb" }
+  ]
+}

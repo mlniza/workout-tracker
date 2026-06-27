@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Berat Badan — Workout Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    .body-grid { display: grid; grid-template-columns: 340px 1fr; gap: 1.5rem; align-items: start; }
+    .weight-history { margin-top: 1.5rem; }
+    .weight-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.65rem 1rem; border-bottom: 1px solid var(--border);
+      font-size: 0.875rem;
+    }
+    .weight-row:last-child { border-bottom: none; }
+    .weight-row__date { color: var(--text-secondary); }
+    .weight-row__kg { font-family: var(--font-display); font-size: 1.3rem; color: var(--black); }
+    .weight-row__note { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem; }
+    @media (max-width: 720px) { .body-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-header__title">BERAT <span>BADAN</span></h1>
+        <p class="page-header__sub">Pantau perubahan berat badanmu</p>
+      </div>
+    </div>
+
+    <!-- Stats row -->
+    <div class="metrics" id="bodyMetrics" style="margin-bottom:1.5rem;">
+      <div class="metric"><div class="metric__label">Berat Terkini</div><div class="metric__value metric__value--red" id="currentWeight">—</div><div class="metric__sub">kg</div></div>
+      <div class="metric"><div class="metric__label">Berat Awal (Log)</div><div class="metric__value" id="firstWeight">—</div><div class="metric__sub">kg</div></div>
+      <div class="metric"><div class="metric__label">Perubahan</div><div class="metric__value" id="weightChange">—</div><div class="metric__sub">kg total</div></div>
+      <div class="metric"><div class="metric__label">Total Log</div><div class="metric__value" id="totalLogs">0</div><div class="metric__sub">entri</div></div>
+    </div>
+
+    <div class="body-grid">
+      <!-- Input form -->
+      <div class="card">
+        <h3 style="font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:1.25rem;">CATAT BERAT BADAN</h3>
+        <div class="form-group">
+          <label class="form-label" for="logDate">Tanggal</label>
+          <input class="form-input" type="date" id="logDate">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="logWeight">Berat (kg)</label>
+          <input class="form-input" type="number" id="logWeight" step="0.1" min="20" max="300" placeholder="72.5">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="logNotes">Catatan <span style="font-weight:400;text-transform:none;">(opsional)</span></label>
+          <input class="form-input" type="text" id="logNotes" placeholder="e.g. Setelah bangun tidur">
+        </div>
+        <button class="btn btn--primary" id="saveWeightBtn" style="width:100%;">Simpan</button>
+      </div>
+
+      <!-- Chart -->
+      <div class="chart-card">
+        <div class="chart-card__header">
+          <span class="chart-card__title">Tren Berat Badan</span>
+          <select class="form-select" id="chartRange" style="width:140px;font-size:0.8rem;padding:0.35rem 0.6rem;">
+            <option value="30">30 hari</option>
+            <option value="90">3 bulan</option>
+            <option value="180">6 bulan</option>
+            <option value="365">1 tahun</option>
+            <option value="0">Semua</option>
+          </select>
+        </div>
+        <canvas id="weightChart" height="220"></canvas>
+      </div>
+    </div>
+
+    <!-- History list -->
+    <div class="card weight-history" style="margin-top:1.5rem;">
+      <h3 style="font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:0.5rem;">RIWAYAT</h3>
+      <div id="weightList"><p style="padding:1rem;color:var(--text-muted);font-size:0.875rem;">Memuat...</p></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase }   from './js/supabase.js'
+    import { requireAuth, initNavbar, getUserId } from './js/auth.js'
+    import { renderNavbar } from './js/navbar.js'
+    import { showToast }  from './js/toast.js'
+
+    renderNavbar()
+    const session = await requireAuth()
+    await initNavbar('body')
+    const userId = getUserId(session)
+
+    document.getElementById('logDate').value = new Date().toISOString().split('T')[0]
+
+    let allLogs = []
+    let chartInstance = null
+
+    async function loadLogs() {
+      const { data } = await supabase
+        .from('body_weight_logs')
+        .select('*')
+        .eq('user_id', userId)
+        .order('logged_date', { ascending: false })
+      allLogs = data || []
+      renderMetrics()
+      renderList()
+      renderChart()
+    }
+
+    function renderMetrics() {
+      if (!allLogs.length) return
+      const sorted = [...allLogs].sort((a, b) => a.logged_date.localeCompare(b.logged_date))
+      const first = parseFloat(sorted[0].weight_kg)
+      const last  = parseFloat(sorted[sorted.length - 1].weight_kg)
+      const diff  = (last - first).toFixed(1)
+      document.getElementById('currentWeight').textContent = last.toFixed(1)
+      document.getElementById('firstWeight').textContent   = first.toFixed(1)
+      document.getElementById('weightChange').textContent  = (diff > 0 ? '+' : '') + diff
+      document.getElementById('weightChange').style.color  = diff > 0 ? 'var(--red)' : '#22C55E'
+      document.getElementById('totalLogs').textContent     = allLogs.length
+    }
+
+    function renderList() {
+      const el = document.getElementById('weightList')
+      if (!allLogs.length) {
+        el.innerHTML = `<div class="empty"><div class="empty__icon">⚖️</div><p class="empty__text">Belum ada data berat badan.</p></div>`
+        return
+      }
+      el.innerHTML = allLogs.slice(0, 20).map(log => {
+        const d = new Date(log.logged_date + 'T00:00:00').toLocaleDateString('id-ID', { weekday:'short', day:'numeric', month:'short', year:'numeric' })
+        return `
+          <div class="weight-row">
+            <div>
+              <div class="weight-row__date">${d}</div>
+              ${log.notes ? `<div class="weight-row__note">${log.notes}</div>` : ''}
+            </div>
+            <div style="display:flex;align-items:center;gap:0.75rem;">
+              <span class="weight-row__kg">${parseFloat(log.weight_kg).toFixed(1)}<span style="font-family:var(--font-body);font-size:0.8rem;color:var(--text-secondary);"> kg</span></span>
+              <button class="btn btn--ghost btn--sm del-log" data-id="${log.id}" title="Hapus">×</button>
+            </div>
+          </div>`
+      }).join('')
+
+      document.querySelectorAll('.del-log').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Hapus entri ini?')) return
+          await supabase.from('body_weight_logs').delete().eq('id', btn.dataset.id)
+          showToast('Entri dihapus')
+          loadLogs()
+        })
+      })
+    }
+
+    function renderChart() {
+      const days = parseInt(document.getElementById('chartRange').value)
+      let filtered = [...allLogs].sort((a, b) => a.logged_date.localeCompare(b.logged_date))
+      if (days > 0) {
+        const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days)
+        filtered = filtered.filter(l => new Date(l.logged_date) >= cutoff)
+      }
+
+      const labels = filtered.map(l => new Date(l.logged_date + 'T00:00:00').toLocaleDateString('id-ID', { day:'numeric', month:'short' }))
+      const values = filtered.map(l => parseFloat(l.weight_kg))
+
+      if (chartInstance) chartInstance.destroy()
+      const ctx = document.getElementById('weightChart').getContext('2d')
+      chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Berat (kg)',
+            data: values,
+            borderColor: '#FF1E1E',
+            backgroundColor: 'rgba(255,30,30,0.07)',
+            borderWidth: 2.5,
+            pointBackgroundColor: '#FF1E1E',
+            pointRadius: 4,
+            tension: 0.3,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: {
+              grid: { color: 'rgba(0,0,0,0.05)' },
+              ticks: { font: { size: 11 } }
+            },
+            x: { grid: { display: false }, ticks: { font: { size: 11 }, maxTicksLimit: 8 } }
+          }
+        }
+      })
+    }
+
+    document.getElementById('chartRange').addEventListener('change', renderChart)
+
+    document.getElementById('saveWeightBtn').addEventListener('click', async () => {
+      const date   = document.getElementById('logDate').value
+      const weight = parseFloat(document.getElementById('logWeight').value)
+      const notes  = document.getElementById('logNotes').value.trim()
+
+      if (!date)          return showToast('Pilih tanggal', 'error')
+      if (isNaN(weight))  return showToast('Masukkan berat yang valid', 'error')
+
+      const { error } = await supabase.from('body_weight_logs').upsert({
+        user_id: userId, logged_date: date, weight_kg: weight, notes: notes || null
+      }, { onConflict: 'user_id,logged_date' })
+
+      if (error) return showToast('Gagal menyimpan: ' + error.message, 'error')
+      showToast(`Berat ${weight} kg tersimpan!`)
+      document.getElementById('logWeight').value = ''
+      document.getElementById('logNotes').value  = ''
+      loadLogs()
+    })
+
+    loadLogs()
+  </script>
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — Workout Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body { padding-top: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--black); }
+    .login-wrap { width: 100%; max-width: 400px; padding: 1rem; }
+    .login-brand {
+      font-family: var(--font-display);
+      font-size: 2.75rem;
+      letter-spacing: 0.05em;
+      color: var(--white);
+      text-align: center;
+      margin-bottom: 0.25rem;
+    }
+    .login-brand span { color: var(--red); }
+    .login-sub { text-align: center; color: var(--gray-500); font-size: 0.85rem; margin-bottom: 2rem; }
+    .login-card {
+      background: var(--gray-900);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-top: 2px solid var(--red);
+      border-radius: var(--radius-lg);
+      padding: 2rem;
+    }
+    .login-card .form-label { color: var(--gray-300); }
+    .login-card .form-input {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.1);
+      color: var(--white);
+    }
+    .login-card .form-input:focus { border-color: var(--red); }
+    .login-card .form-input::placeholder { color: var(--gray-500); }
+    .btn-login {
+      width: 100%;
+      padding: 0.8rem;
+      background: var(--red);
+      color: white;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      margin-top: 0.5rem;
+      transition: background 0.15s;
+    }
+    .btn-login:hover { background: var(--red-dark); }
+    .btn-login:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error-msg {
+      font-size: 0.8rem;
+      color: var(--red);
+      margin-top: 0.75rem;
+      text-align: center;
+      min-height: 1.2rem;
+    }
+    .login-footer { text-align: center; margin-top: 1.5rem; font-size: 0.75rem; color: var(--gray-500); }
+  </style>
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-brand">WORKOUT<span>.</span>TRACKER</div>
+    <p class="login-sub">Masuk untuk melihat data latihanmu</p>
+
+    <div class="login-card">
+      <div class="form-group">
+        <label class="form-label" for="email">Email</label>
+        <input class="form-input" type="email" id="email" placeholder="kamu@email.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <input class="form-input" type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+      </div>
+      <button class="btn-login" id="loginBtn">MASUK</button>
+      <p class="error-msg" id="errorMsg"></p>
+    </div>
+
+    <p class="login-footer">Akses terbatas. Hubungi admin untuk akun baru.</p>
+  </div>
+
+  <script type="module">
+    import { supabase } from './js/supabase.js'
+
+    // Redirect if already logged in
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) window.location.href = '/index.html'
+
+    const emailEl  = document.getElementById('email')
+    const passEl   = document.getElementById('password')
+    const btn      = document.getElementById('loginBtn')
+    const errorMsg = document.getElementById('errorMsg')
+
+    async function login() {
+      errorMsg.textContent = ''
+      const email    = emailEl.value.trim()
+      const password = passEl.value
+
+      if (!email || !password) {
+        errorMsg.textContent = 'Email dan password wajib diisi.'
+        return
+      }
+
+      btn.disabled = true
+      btn.textContent = 'Memproses...'
+
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+
+      if (error) {
+        errorMsg.textContent = 'Email atau password salah.'
+        btn.disabled = false
+        btn.textContent = 'MASUK'
+      } else {
+        window.location.href = '/index.html'
+      }
+    }
+
+    btn.addEventListener('click', login)
+    passEl.addEventListener('keydown', e => { if (e.key === 'Enter') login() })
+  </script>
+</body>
+</html>

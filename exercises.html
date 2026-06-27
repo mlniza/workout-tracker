@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exercise Library — Workout Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .lib-grid { display: grid; grid-template-columns: 320px 1fr; gap: 1.5rem; align-items: start; }
+    .category-section { margin-bottom: 2rem; }
+    .category-title {
+      font-family: var(--font-display); font-size: 1.25rem; letter-spacing: 0.04em;
+      color: var(--black); border-bottom: 2px solid var(--black);
+      padding-bottom: 0.35rem; margin-bottom: 0.85rem;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .category-title span { font-family: var(--font-body); font-size: 0.75rem; color: var(--text-muted); font-weight: 400; }
+    .search-filter { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    @media (max-width: 720px) { .lib-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-header__title">EXERCISE <span>LIBRARY</span></h1>
+        <p class="page-header__sub" id="exCount">Memuat...</p>
+      </div>
+    </div>
+
+    <div class="lib-grid">
+      <!-- Add custom form -->
+      <div class="card" style="position:sticky;top:calc(var(--nav-h) + 1rem);">
+        <h3 style="font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:1.25rem;">
+          TAMBAH EXERCISE CUSTOM
+        </h3>
+        <div class="form-group">
+          <label class="form-label">Nama Exercise</label>
+          <input class="form-input" type="text" id="exName" placeholder="e.g. Cable Fly">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Kategori</label>
+          <select class="form-select" id="exCategory">
+            <option value="">Pilih kategori...</option>
+            <option>Chest</option><option>Back</option><option>Legs</option>
+            <option>Shoulders</option><option>Arms</option><option>Core</option>
+            <option>Cardio</option><option>Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Muscle Group</label>
+          <input class="form-input" type="text" id="exMuscle" placeholder="e.g. Pectorals">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Equipment <span style="font-weight:400;text-transform:none;">(opsional)</span></label>
+          <select class="form-select" id="exEquipment">
+            <option value="">Pilih alat...</option>
+            <option>Barbell</option><option>Dumbbell</option><option>Cable</option>
+            <option>Machine</option><option>Bodyweight</option><option>Kettlebell</option><option>Other</option>
+          </select>
+        </div>
+        <button class="btn btn--primary" id="addExBtn" style="width:100%;">Tambah Exercise</button>
+      </div>
+
+      <!-- Exercise list -->
+      <div>
+        <div class="search-filter">
+          <input class="form-input" type="text" id="searchEx" placeholder="Cari exercise..." style="flex:1;min-width:180px;">
+          <select class="form-select" id="filterCat" style="width:160px;">
+            <option value="">Semua Kategori</option>
+            <option>Chest</option><option>Back</option><option>Legs</option>
+            <option>Shoulders</option><option>Arms</option><option>Core</option>
+            <option>Cardio</option><option>Other</option>
+          </select>
+        </div>
+        <div id="exerciseList">
+          <div class="empty"><div class="empty__icon">💪</div><p class="empty__text">Memuat exercise...</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase }   from './js/supabase.js'
+    import { requireAuth, initNavbar, getUserId } from './js/auth.js'
+    import { renderNavbar } from './js/navbar.js'
+    import { showToast }  from './js/toast.js'
+
+    renderNavbar()
+    const session = await requireAuth()
+    await initNavbar('exercises')
+    const userId = getUserId(session)
+
+    let allExercises = []
+
+    async function loadExercises() {
+      const { data } = await supabase.from('exercises').select('*').order('category').order('name')
+      allExercises = data || []
+      document.getElementById('exCount').textContent = `${allExercises.length} exercise tersedia`
+      renderList()
+    }
+
+    function renderList() {
+      const q   = document.getElementById('searchEx').value.toLowerCase()
+      const cat = document.getElementById('filterCat').value
+      const filtered = allExercises.filter(e =>
+        (!q || e.name.toLowerCase().includes(q) || e.muscle_group.toLowerCase().includes(q)) &&
+        (!cat || e.category === cat)
+      )
+
+      const byCategory = {}
+      filtered.forEach(e => {
+        if (!byCategory[e.category]) byCategory[e.category] = []
+        byCategory[e.category].push(e)
+      })
+
+      const el = document.getElementById('exerciseList')
+      if (!filtered.length) {
+        el.innerHTML = `<div class="empty"><div class="empty__icon">🔍</div><p class="empty__text">Tidak ada exercise yang cocok.</p></div>`
+        return
+      }
+
+      el.innerHTML = Object.entries(byCategory).map(([cat, exs]) => `
+        <div class="category-section">
+          <div class="category-title">
+            ${cat} <span>${exs.length} exercise</span>
+          </div>
+          <div class="exercise-grid">
+            ${exs.map(e => `
+              <div class="exercise-card">
+                <div class="exercise-card__name">${e.name}</div>
+                <div class="exercise-card__meta">${e.muscle_group}</div>
+                ${e.equipment ? `<div class="exercise-card__meta" style="margin-top:0.2rem;">${e.equipment}</div>` : ''}
+                <div style="margin-top:0.5rem;display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                  ${e.is_preset
+                    ? `<span class="badge badge--gray">Preset</span>`
+                    : `<span class="badge badge--red">Custom</span>
+                       <button class="btn btn--ghost btn--sm del-ex" data-id="${e.id}" style="padding:0.2rem 0.5rem;font-size:0.7rem;">Hapus</button>`
+                  }
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>`).join('')
+
+      document.querySelectorAll('.del-ex').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Hapus exercise ini?')) return
+          const { error } = await supabase.from('exercises').delete().eq('id', btn.dataset.id)
+          if (error) return showToast('Gagal menghapus', 'error')
+          showToast('Exercise dihapus')
+          loadExercises()
+        })
+      })
+    }
+
+    document.getElementById('searchEx').addEventListener('input', renderList)
+    document.getElementById('filterCat').addEventListener('change', renderList)
+
+    document.getElementById('addExBtn').addEventListener('click', async () => {
+      const name     = document.getElementById('exName').value.trim()
+      const category = document.getElementById('exCategory').value
+      const muscle   = document.getElementById('exMuscle').value.trim()
+      const equipment= document.getElementById('exEquipment').value
+
+      if (!name)     return showToast('Nama exercise wajib diisi', 'error')
+      if (!category) return showToast('Pilih kategori', 'error')
+      if (!muscle)   return showToast('Muscle group wajib diisi', 'error')
+
+      const { error } = await supabase.from('exercises').insert({
+        user_id: userId, name, category, muscle_group: muscle,
+        equipment: equipment || null, is_preset: false
+      })
+
+      if (error) return showToast(error.code === '23505' ? 'Nama exercise sudah ada' : 'Gagal menambah', 'error')
+      showToast(`"${name}" berhasil ditambahkan!`)
+      document.getElementById('exName').value = ''
+      document.getElementById('exMuscle').value = ''
+      document.getElementById('exCategory').value = ''
+      document.getElementById('exEquipment').value = ''
+      loadExercises()
+    })
+
+    loadExercises()
+  </script>
+</body>
+</html>

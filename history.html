@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Riwayat — Workout Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .filter-bar {
+      display: flex; gap: 0.75rem; flex-wrap: wrap;
+      align-items: flex-end; margin-bottom: 2rem;
+    }
+    .filter-bar .form-group { margin: 0; }
+    .filter-bar label { white-space: nowrap; }
+    .vol-badge {
+      display: inline-block; font-size: 0.75rem;
+      color: var(--text-secondary); margin-left: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-header__title">RIWAYAT <span>LATIHAN</span></h1>
+        <p class="page-header__sub" id="resultCount">Memuat data...</p>
+      </div>
+      <a href="/log.html" class="btn btn--primary btn--sm">+ Log Sesi</a>
+    </div>
+
+    <!-- Filters -->
+    <div class="filter-bar">
+      <div class="form-group">
+        <label class="form-label">Dari</label>
+        <input class="form-input" type="date" id="filterFrom" style="width:160px;">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sampai</label>
+        <input class="form-input" type="date" id="filterTo" style="width:160px;">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Exercise</label>
+        <select class="form-select" id="filterExercise" style="width:200px;">
+          <option value="">Semua Exercise</option>
+        </select>
+      </div>
+      <button class="btn btn--black btn--sm" id="applyFilter">Terapkan</button>
+      <button class="btn btn--ghost btn--sm" id="clearFilter">Reset</button>
+    </div>
+
+    <!-- Sessions list -->
+    <div id="sessionsList">
+      <div class="empty"><div class="empty__icon">🏋️</div><p class="empty__text">Memuat...</p></div>
+    </div>
+  </div>
+
+  <!-- Delete confirm modal -->
+  <div class="modal-overlay" id="deleteModal" style="display:none;">
+    <div class="modal">
+      <h3 class="modal__title">Hapus Sesi?</h3>
+      <p style="font-size:0.875rem;color:var(--text-secondary);" id="deleteDesc">Semua set akan dihapus permanen.</p>
+      <div class="modal__actions">
+        <button class="btn btn--ghost" id="cancelDelete">Batal</button>
+        <button class="btn btn--danger" id="confirmDelete">Hapus</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase }   from './js/supabase.js'
+    import { requireAuth, initNavbar, getUserId } from './js/auth.js'
+    import { renderNavbar } from './js/navbar.js'
+    import { showToast }  from './js/toast.js'
+
+    renderNavbar()
+    const session = await requireAuth()
+    await initNavbar('history')
+    const userId = getUserId(session)
+
+    // ── Default date range: last 30 days
+    const today = new Date()
+    const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30)
+    document.getElementById('filterFrom').value = monthAgo.toISOString().split('T')[0]
+    document.getElementById('filterTo').value   = today.toISOString().split('T')[0]
+
+    // ── Load all exercise names for filter dropdown
+    const { data: exercises } = await supabase
+      .from('workout_sessions')
+      .select('exercise_name')
+      .eq('user_id', userId)
+    const uniqueNames = [...new Set((exercises || []).map(e => e.exercise_name))].sort()
+    const exSelect = document.getElementById('filterExercise')
+    uniqueNames.forEach(name => {
+      const opt = document.createElement('option')
+      opt.value = opt.textContent = name
+      exSelect.appendChild(opt)
+    })
+
+    // ── Fetch & render
+    async function loadSessions() {
+      const from = document.getElementById('filterFrom').value
+      const to   = document.getElementById('filterTo').value
+      const ex   = document.getElementById('filterExercise').value
+
+      let query = supabase
+        .from('workout_sessions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('session_date', { ascending: false })
+        .order('exercise_name')
+        .order('set_number')
+
+      if (from) query = query.gte('session_date', from)
+      if (to)   query = query.lte('session_date', to)
+      if (ex)   query = query.eq('exercise_name', ex)
+
+      const { data, error } = await query
+      if (error) { showToast('Gagal memuat data', 'error'); return }
+
+      renderSessions(data || [])
+    }
+
+    function renderSessions(rows) {
+      const list = document.getElementById('sessionsList')
+      if (!rows.length) {
+        list.innerHTML = `<div class="empty"><div class="empty__icon">📭</div><p class="empty__text">Belum ada data di periode ini.</p><a href="/log.html" class="btn btn--primary btn--sm">Log Sesi Pertama</a></div>`
+        document.getElementById('resultCount').textContent = '0 sesi ditemukan'
+        return
+      }
+
+      // Group by date → exercise
+      const byDate = {}
+      rows.forEach(r => {
+        if (!byDate[r.session_date]) byDate[r.session_date] = {}
+        if (!byDate[r.session_date][r.exercise_name]) byDate[r.session_date][r.exercise_name] = []
+        byDate[r.session_date][r.exercise_name].push(r)
+      })
+
+      const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a))
+      const totalSessions = dates.length
+      document.getElementById('resultCount').textContent = `${totalSessions} hari latihan ditemukan`
+
+      list.innerHTML = dates.map(date => {
+        const exGroups = byDate[date]
+        const exNames  = Object.keys(exGroups)
+        const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('id-ID', {
+          weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+        })
+        const totalVol = rows
+          .filter(r => r.session_date === date)
+          .reduce((s, r) => s + r.reps * parseFloat(r.weight_kg), 0)
+
+        return `
+          <div class="session-group">
+            <div class="session-group__date">
+              <span>${dateLabel}</span>
+              <span style="font-size:0.8rem;font-family:var(--font-body);font-weight:500;color:var(--text-secondary);">
+                Vol: ${totalVol.toLocaleString('id-ID')} kg
+              </span>
+            </div>
+            ${exNames.map(exName => {
+              const sets = exGroups[exName]
+              const maxW = Math.max(...sets.map(s => parseFloat(s.weight_kg)))
+              const exVol = sets.reduce((s, r) => s + r.reps * parseFloat(r.weight_kg), 0)
+              return `
+                <div class="session-exercise">
+                  <div class="session-exercise__header">
+                    <span class="session-exercise__name">${exName}</span>
+                    <div style="display:flex;align-items:center;gap:0.5rem;">
+                      <span class="badge badge--gray">${sets.length} set</span>
+                      <span class="badge badge--red">Max: ${maxW} kg</span>
+                      <button class="btn btn--ghost btn--sm delete-btn"
+                        data-date="${date}" data-ex="${exName}"
+                        title="Hapus sesi ini">🗑</button>
+                    </div>
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>SET</th><th>REPS</th><th>BERAT (KG)</th><th>VOLUME</th><th>CATATAN</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${sets.map(s => `
+                        <tr>
+                          <td style="font-family:var(--font-display);color:var(--red);font-size:1.1rem;">${s.set_number}</td>
+                          <td>${s.reps}</td>
+                          <td><strong>${s.weight_kg} kg</strong></td>
+                          <td class="vol-cell">${(s.reps * parseFloat(s.weight_kg)).toLocaleString('id-ID')} kg</td>
+                          <td style="color:var(--text-secondary);font-size:0.8rem;">${s.notes || '—'}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                  </table>
+                </div>`
+            }).join('')}
+          </div>`
+      }).join('')
+
+      // Delete buttons
+      document.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => openDeleteModal(btn.dataset.date, btn.dataset.ex))
+      })
+    }
+
+    // ── Delete modal
+    let pendingDelete = null
+    function openDeleteModal(date, exName) {
+      pendingDelete = { date, exName }
+      document.getElementById('deleteDesc').textContent =
+        `Hapus semua set "${exName}" pada ${date}? Tindakan ini tidak bisa dibatalkan.`
+      document.getElementById('deleteModal').style.display = 'flex'
+    }
+    document.getElementById('cancelDelete').addEventListener('click', () => {
+      document.getElementById('deleteModal').style.display = 'none'
+      pendingDelete = null
+    })
+    document.getElementById('confirmDelete').addEventListener('click', async () => {
+      if (!pendingDelete) return
+      const { error } = await supabase
+        .from('workout_sessions')
+        .delete()
+        .eq('user_id', userId)
+        .eq('session_date', pendingDelete.date)
+        .eq('exercise_name', pendingDelete.exName)
+      document.getElementById('deleteModal').style.display = 'none'
+      if (error) { showToast('Gagal menghapus', 'error'); return }
+      showToast('Sesi berhasil dihapus')
+      loadSessions()
+    })
+
+    // ── Filter controls
+    document.getElementById('applyFilter').addEventListener('click', loadSessions)
+    document.getElementById('clearFilter').addEventListener('click', () => {
+      document.getElementById('filterFrom').value = monthAgo.toISOString().split('T')[0]
+      document.getElementById('filterTo').value   = today.toISOString().split('T')[0]
+      document.getElementById('filterExercise').value = ''
+      loadSessions()
+    })
+
+    loadSessions()
+  </script>
+</body>
+</html>
