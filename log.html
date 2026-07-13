@@ -25,6 +25,12 @@
     }
     .saved-ex-item strong { color: var(--text-primary); }
     .saved-ex-item span { color: var(--text-secondary); font-size: 0.8rem; }
+
+    /* Cardio form */
+    .cardio-form { display: flex; flex-direction: column; gap: 1rem; }
+    .cardio-form .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .cardio-form .form-row--full { grid-template-columns: 1fr; }
+    .type-badge { font-size: 0.65rem; }
   </style>
 </head>
 <body>
@@ -59,29 +65,55 @@
         <span class="badge badge--black" id="metaCategory"></span>
         <span class="badge badge--gray"  id="metaMuscle"></span>
         <span class="badge badge--gray"  id="metaEquipment"></span>
+        <span class="badge badge--red type-badge" id="metaType"></span>
       </div>
 
-      <!-- Set table -->
-      <div class="set-table-wrap">
-        <table class="set-table" id="setTable">
-          <thead>
-            <tr>
-              <th>SET</th>
-              <th>REPS</th>
-              <th>BERAT (KG)</th>
-              <th>CATATAN</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="setBody">
-            <tr><td colspan="5" class="no-sets">Pilih exercise terlebih dahulu</td></tr>
-          </tbody>
-        </table>
-      </div>
+      <!-- Dynamic input area — changes based on exercise type -->
+      <div id="inputArea">
+        <!-- Strength/Plyometric: set table -->
+        <div id="setTableArea">
+          <div class="set-table-wrap">
+            <table class="set-table" id="setTable">
+              <thead id="setTableHead">
+                <tr>
+                  <th>SET</th>
+                  <th>REPS</th>
+                  <th>BERAT (KG)</th>
+                  <th>CATATAN</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="setBody">
+                <tr><td colspan="5" class="no-sets">Pilih exercise terlebih dahulu</td></tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="set-actions">
-        <button class="btn btn--outline btn--sm" id="addSetBtn" disabled>+ Tambah Set</button>
-        <span class="session-count" id="setCount"></span>
+          <div class="set-actions">
+            <button class="btn btn--outline btn--sm" id="addSetBtn" disabled>+ Tambah Set</button>
+            <span class="session-count" id="setCount"></span>
+          </div>
+        </div>
+
+        <!-- Cardio: single entry form -->
+        <div id="cardioArea" style="display:none;">
+          <div class="cardio-form">
+            <div class="form-row">
+              <div class="form-group" style="margin:0;">
+                <label class="form-label" for="cardioDuration">Durasi (menit)</label>
+                <input class="form-input" type="number" id="cardioDuration" min="1" step="1" placeholder="30">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label" for="cardioDistance">Jarak (km) <span style="font-weight:400;text-transform:none;">— opsional</span></label>
+                <input class="form-input" type="number" id="cardioDistance" min="0" step="0.1" placeholder="5.0">
+              </div>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" for="cardioNotes">Catatan <span style="font-weight:400;text-transform:none;">— opsional</span></label>
+              <input class="form-input" type="text" id="cardioNotes" placeholder="e.g. Pace 6:30/km">
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="submit-area">
@@ -119,15 +151,25 @@
     document.getElementById('sessionSub').textContent =
       `Sesi: ${new Date().toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}`
 
-    // ── Load exercises
+    // ── Load exercises (including type column)
     const { data: exercises } = await supabase.from('exercises').select('*').order('category')
     let selectedExercise = null
     let setRows = []
 
-    // ── Search dropdown
-    const searchEl  = document.getElementById('exerciseSearch')
-    const dropdown  = document.getElementById('exerciseDropdown')
+    // ── DOM refs
+    const searchEl     = document.getElementById('exerciseSearch')
+    const dropdown     = document.getElementById('exerciseDropdown')
+    const setTableArea = document.getElementById('setTableArea')
+    const cardioArea   = document.getElementById('cardioArea')
+    const addSetBtn    = document.getElementById('addSetBtn')
+    const saveExBtn    = document.getElementById('saveExBtn')
 
+    // ── Helper: get exercise type (default to 'strength' if missing)
+    function getExType(ex) {
+      return (ex?.type || 'strength').toLowerCase()
+    }
+
+    // ── Search dropdown
     searchEl.addEventListener('input', () => {
       const q = searchEl.value.toLowerCase().trim()
       if (!q) { dropdown.classList.remove('open'); return }
@@ -138,7 +180,7 @@
         ? matches.map(e => `
             <div class="dropdown-item" data-id="${e.id}">
               <span>${e.name}</span>
-              <span class="dropdown-item__cat">${e.category}</span>
+              <span class="dropdown-item__cat">${e.category}${e.type && e.type !== 'strength' ? ` · ${e.type}` : ''}</span>
             </div>`).join('')
         : '<div class="dropdown-item" style="color:var(--text-muted);">Tidak ditemukan</div>'
       dropdown.classList.add('open')
@@ -151,10 +193,8 @@
       searchEl.value = selectedExercise.name
       dropdown.classList.remove('open')
       renderExerciseMeta()
-      setRows = [{ reps: '', weight: '', notes: '' }]
-      renderSetTable()
-      document.getElementById('addSetBtn').disabled = false
-      document.getElementById('saveExBtn').disabled = false
+      switchInputMode(getExType(selectedExercise))
+      saveExBtn.disabled = false
     })
 
     document.addEventListener('click', e => {
@@ -168,16 +208,53 @@
       document.getElementById('metaCategory').textContent  = selectedExercise.category
       document.getElementById('metaMuscle').textContent    = selectedExercise.muscle_group
       document.getElementById('metaEquipment').textContent = selectedExercise.equipment || 'Bodyweight'
+
+      const typeEl = document.getElementById('metaType')
+      const t = getExType(selectedExercise)
+      typeEl.textContent = t.toUpperCase()
+      typeEl.style.display = 'inline-flex'
     }
 
-    // ── Set table
+    // ── Switch input mode based on exercise type
+    function switchInputMode(type) {
+      if (type === 'cardio') {
+        setTableArea.style.display = 'none'
+        cardioArea.style.display = 'block'
+        addSetBtn.disabled = true
+        // Clear cardio fields
+        document.getElementById('cardioDuration').value = ''
+        document.getElementById('cardioDistance').value = ''
+        document.getElementById('cardioNotes').value = ''
+      } else {
+        setTableArea.style.display = 'block'
+        cardioArea.style.display = 'none'
+        addSetBtn.disabled = false
+
+        // Update set table headers based on type
+        const thead = document.getElementById('setTableHead')
+        if (type === 'plyometric') {
+          thead.innerHTML = `<tr><th>SET</th><th>REPS</th><th>CATATAN</th><th></th></tr>`
+        } else {
+          thead.innerHTML = `<tr><th>SET</th><th>REPS</th><th>BERAT (KG)</th><th>CATATAN</th><th></th></tr>`
+        }
+
+        setRows = [{ reps: '', weight: '', notes: '' }]
+        renderSetTable()
+      }
+    }
+
+    // ── Set table (strength + plyometric)
     function renderSetTable() {
+      const type = getExType(selectedExercise)
       const tbody = document.getElementById('setBody')
+      const isPlyometric = type === 'plyometric'
+      const colSpan = isPlyometric ? 4 : 5
+
       tbody.innerHTML = setRows.map((row, i) => `
         <tr data-idx="${i}">
           <td><span class="set-num">${i + 1}</span></td>
           <td><input type="number" class="form-input reps-input" min="1" value="${row.reps}" placeholder="0"></td>
-          <td><input type="number" class="form-input weight-input" min="0" step="0.5" value="${row.weight}" placeholder="0"></td>
+          ${isPlyometric ? '' : `<td><input type="number" class="form-input weight-input" min="0" step="0.5" value="${row.weight}" placeholder="0"></td>`}
           <td><input type="text" class="form-input notes-input" value="${row.notes}" placeholder="Opsional..."></td>
           <td><button class="btn btn--ghost btn--sm remove-set" title="Hapus set">×</button></td>
         </tr>`).join('')
@@ -187,7 +264,8 @@
       tbody.querySelectorAll('tr').forEach(tr => {
         const idx = +tr.dataset.idx
         tr.querySelector('.reps-input').addEventListener('input',   e => { setRows[idx].reps   = e.target.value })
-        tr.querySelector('.weight-input').addEventListener('input', e => { setRows[idx].weight = e.target.value })
+        const weightEl = tr.querySelector('.weight-input')
+        if (weightEl) weightEl.addEventListener('input', e => { setRows[idx].weight = e.target.value })
         tr.querySelector('.notes-input').addEventListener('input',  e => { setRows[idx].notes  = e.target.value })
         tr.querySelector('.remove-set').addEventListener('click',   () => {
           if (setRows.length === 1) return
@@ -197,7 +275,7 @@
       })
     }
 
-    document.getElementById('addSetBtn').addEventListener('click', () => {
+    addSetBtn.addEventListener('click', () => {
       setRows.push({ reps: '', weight: '', notes: '' })
       renderSetTable()
     })
@@ -205,30 +283,85 @@
     // ── Save exercise to Supabase
     const savedExercises = []
 
-    document.getElementById('saveExBtn').addEventListener('click', async () => {
+    saveExBtn.addEventListener('click', async () => {
       if (!selectedExercise) return showToast('Pilih exercise dulu', 'error')
       const date = dateEl.value
       if (!date) return showToast('Pilih tanggal sesi', 'error')
 
-      const validSets = setRows.filter(r => r.reps && r.weight !== '')
-      if (!validSets.length) return showToast('Isi minimal 1 set (reps & berat)', 'error')
+      const type = getExType(selectedExercise)
 
-      const records = validSets.map((r, i) => ({
-        user_id:       userId,
-        session_date:  date,
-        exercise_id:   selectedExercise.id,
-        exercise_name: selectedExercise.name,
-        set_number:    i + 1,
-        reps:          parseInt(r.reps),
-        weight_kg:     parseFloat(r.weight),
-        notes:         r.notes || null
-      }))
+      if (type === 'cardio') {
+        // ── Cardio save
+        const duration = parseInt(document.getElementById('cardioDuration').value)
+        const distance = parseFloat(document.getElementById('cardioDistance').value) || null
+        const notes    = document.getElementById('cardioNotes').value.trim() || null
 
-      const { error } = await supabase.from('workout_sessions').insert(records)
-      if (error) return showToast('Gagal menyimpan: ' + error.message, 'error')
+        if (!duration || duration <= 0) return showToast('Isi durasi (menit)', 'error')
 
-      showToast(`${selectedExercise.name} — ${validSets.length} set tersimpan!`)
-      savedExercises.push({ name: selectedExercise.name, sets: validSets.length, date })
+        const record = {
+          user_id:       userId,
+          session_date:  date,
+          exercise_id:   selectedExercise.id,
+          exercise_name: selectedExercise.name,
+          set_number:    1,
+          reps:          null,
+          weight_kg:     null,
+          duration_min:  duration,
+          distance_km:   distance,
+          notes
+        }
+
+        const { error } = await supabase.from('workout_sessions').insert([record])
+        if (error) return showToast('Gagal menyimpan: ' + error.message, 'error')
+
+        showToast(`${selectedExercise.name} — ${duration} menit tersimpan!`)
+        savedExercises.push({ name: selectedExercise.name, detail: `${duration} min`, date })
+
+      } else if (type === 'plyometric') {
+        // ── Plyometric save (reps, no weight)
+        const validSets = setRows.filter(r => r.reps)
+        if (!validSets.length) return showToast('Isi minimal 1 set (reps)', 'error')
+
+        const records = validSets.map((r, i) => ({
+          user_id:       userId,
+          session_date:  date,
+          exercise_id:   selectedExercise.id,
+          exercise_name: selectedExercise.name,
+          set_number:    i + 1,
+          reps:          parseInt(r.reps),
+          weight_kg:     null,
+          notes:         r.notes || null
+        }))
+
+        const { error } = await supabase.from('workout_sessions').insert(records)
+        if (error) return showToast('Gagal menyimpan: ' + error.message, 'error')
+
+        showToast(`${selectedExercise.name} — ${validSets.length} set tersimpan!`)
+        savedExercises.push({ name: selectedExercise.name, detail: `${validSets.length} set`, date })
+
+      } else {
+        // ── Strength save (reps + weight)
+        const validSets = setRows.filter(r => r.reps && r.weight !== '')
+        if (!validSets.length) return showToast('Isi minimal 1 set (reps & berat)', 'error')
+
+        const records = validSets.map((r, i) => ({
+          user_id:       userId,
+          session_date:  date,
+          exercise_id:   selectedExercise.id,
+          exercise_name: selectedExercise.name,
+          set_number:    i + 1,
+          reps:          parseInt(r.reps),
+          weight_kg:     parseFloat(r.weight),
+          notes:         r.notes || null
+        }))
+
+        const { error } = await supabase.from('workout_sessions').insert(records)
+        if (error) return showToast('Gagal menyimpan: ' + error.message, 'error')
+
+        showToast(`${selectedExercise.name} — ${validSets.length} set tersimpan!`)
+        savedExercises.push({ name: selectedExercise.name, detail: `${validSets.length} set`, date })
+      }
+
       renderSavedList()
       resetForm()
     })
@@ -238,7 +371,7 @@
       document.getElementById('savedList').innerHTML = savedExercises.map(ex => `
         <div class="saved-ex-item">
           <strong>${ex.name}</strong>
-          <span>${ex.sets} set · ${ex.date}</span>
+          <span>${ex.detail} · ${ex.date}</span>
         </div>`).join('')
     }
 
@@ -247,10 +380,21 @@
       setRows = []
       searchEl.value = ''
       document.getElementById('exerciseMeta').style.display = 'none'
+      document.getElementById('metaType').style.display = 'none'
+
+      // Reset set table to default
+      setTableArea.style.display = 'block'
+      cardioArea.style.display = 'none'
+      document.getElementById('setTableHead').innerHTML = '<tr><th>SET</th><th>REPS</th><th>BERAT (KG)</th><th>CATATAN</th><th></th></tr>'
       document.getElementById('setBody').innerHTML = '<tr><td colspan="5" class="no-sets">Pilih exercise terlebih dahulu</td></tr>'
-      document.getElementById('addSetBtn').disabled = true
-      document.getElementById('saveExBtn').disabled = true
+      addSetBtn.disabled = true
+      saveExBtn.disabled = true
       document.getElementById('setCount').textContent = ''
+
+      // Reset cardio fields
+      document.getElementById('cardioDuration').value = ''
+      document.getElementById('cardioDistance').value = ''
+      document.getElementById('cardioNotes').value = ''
     }
 
     document.getElementById('resetBtn').addEventListener('click', resetForm)

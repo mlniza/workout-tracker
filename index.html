@@ -81,7 +81,12 @@
       <div class="metric">
         <div class="metric__label">Volume Minggu Ini</div>
         <div class="metric__value" id="mVolume">—</div>
-        <div class="metric__sub">kg total</div>
+        <div class="metric__sub">kg (strength)</div>
+      </div>
+      <div class="metric">
+        <div class="metric__label">Cardio Minggu Ini</div>
+        <div class="metric__value" id="mCardio">—</div>
+        <div class="metric__sub">menit</div>
       </div>
       <div class="metric">
         <div class="metric__label">Berat Badan</div>
@@ -185,13 +190,23 @@
     document.getElementById('dashSub').textContent =
       now.toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' })
 
-    // ── Load all data
-    const [{ data: sessions }, { data: bodyLogs }] = await Promise.all([
+    // ── Load all data (including exercises for type mapping)
+    const [{ data: sessions }, { data: bodyLogs }, { data: exerciseList }] = await Promise.all([
       supabase.from('workout_sessions').select('*').eq('user_id', userId).order('session_date', { ascending: false }),
-      supabase.from('body_weight_logs').select('*').eq('user_id', userId).order('logged_date', { ascending: false })
+      supabase.from('body_weight_logs').select('*').eq('user_id', userId).order('logged_date', { ascending: false }),
+      supabase.from('exercises').select('id, name, type')
     ])
     const allSessions = sessions || []
     const allBody     = bodyLogs  || []
+
+    // ── Build exercise type map: exercise_name → type
+    const exTypeMap = {}
+    ;(exerciseList || []).forEach(e => { exTypeMap[e.name] = (e.type || 'strength').toLowerCase() })
+    function getExType(name) { return exTypeMap[name] || 'strength' }
+
+    // ── Helper: is strength/plyometric (has volume)
+    function isVolumeType(name) { const t = getExType(name); return t === 'strength' || t === 'plyometric' }
+    function isCardioType(name) { return getExType(name) === 'cardio' }
 
     // ── Fatigue Signals
     const fatigueSignals = detectFatigueSignals(allSessions)
@@ -208,10 +223,18 @@
 
     const weekStart = new Date(now); weekStart.setDate(weekStart.getDate() - weekStart.getDay())
     const weekStr   = weekStart.toISOString().split('T')[0]
-    const weekVol   = allSessions
-      .filter(s => s.session_date >= weekStr)
+
+    // Volume: strength + plyometric only
+    const weekVol = allSessions
+      .filter(s => s.session_date >= weekStr && isVolumeType(s.exercise_name) && s.reps && s.weight_kg)
       .reduce((sum, s) => sum + s.reps * parseFloat(s.weight_kg), 0)
     document.getElementById('mVolume').textContent = weekVol.toLocaleString('id-ID')
+
+    // Cardio: total duration this week
+    const weekCardio = allSessions
+      .filter(s => s.session_date >= weekStr && isCardioType(s.exercise_name) && s.duration_min)
+      .reduce((sum, s) => sum + parseFloat(s.duration_min), 0)
+    document.getElementById('mCardio').textContent = weekCardio ? Math.round(weekCardio).toLocaleString('id-ID') : '0'
 
     if (allBody.length) {
       document.getElementById('mBerat').textContent = parseFloat(allBody[0].weight_kg).toFixed(1)
@@ -222,7 +245,7 @@
     // ── Heatmap Calendar
     renderHeatmap(document.getElementById('heatmapContainer'), allSessions)
 
-    // ── Volume weekly chart
+    // ── Volume weekly chart (strength + plyometric only)
     const weekLabels = [], weekVolumes = []
     for (let i = 7; i >= 0; i--) {
       const d = new Date(now)
@@ -232,8 +255,11 @@
       const ws = wStart.toISOString().split('T')[0]
       const we = wEnd.toISOString().split('T')[0]
       weekLabels.push(`W${wStart.toLocaleDateString('id-ID', { day:'numeric', month:'short' })}`)
-      weekVolumes.push(allSessions.filter(s => s.session_date >= ws && s.session_date <= we)
-        .reduce((sum, s) => sum + s.reps * parseFloat(s.weight_kg), 0))
+      weekVolumes.push(
+        allSessions
+          .filter(s => s.session_date >= ws && s.session_date <= we && isVolumeType(s.exercise_name) && s.reps && s.weight_kg)
+          .reduce((sum, s) => sum + s.reps * parseFloat(s.weight_kg), 0)
+      )
     }
     new Chart(document.getElementById('volumeChart').getContext('2d'), {
       type: 'bar',
@@ -274,23 +300,52 @@
     })
     updateRadarChart(30) // default: 30 days
 
-    // ── Progress exercise chart
+    // ── Progress exercise chart (type-aware)
     const exNames = [...new Set(allSessions.map(s => s.exercise_name))].sort()
     const exSelect = document.getElementById('progressExercise')
-    exNames.forEach(n => { const o = document.createElement('option'); o.value = o.textContent = n; exSelect.appendChild(o) })
+    exNames.forEach(n => {
+      const o = document.createElement('option')
+      o.value = n
+      o.textContent = n
+      exSelect.appendChild(o)
+    })
 
     let progressChart = null
     function renderProgressChart(exName) {
-      const exData = allSessions
-        .filter(s => s.exercise_name === exName)
-        .reduce((acc, s) => {
-          if (!acc[s.session_date] || parseFloat(s.weight_kg) > acc[s.session_date])
-            acc[s.session_date] = parseFloat(s.weight_kg)
-          return acc
-        }, {})
-      const dates  = Object.keys(exData).sort()
+      const type = getExType(exName)
+      const exSessions = allSessions.filter(s => s.exercise_name === exName)
+
+      let dataByDate, yLabel
+
+      if (type === 'cardio') {
+        // Y = duration_min per session
+        yLabel = 'Durasi (menit)'
+        dataByDate = {}
+        exSessions.forEach(s => {
+          if (s.duration_min) dataByDate[s.session_date] = parseFloat(s.duration_min)
+        })
+      } else if (type === 'plyometric') {
+        // Y = total reps per session date
+        yLabel = 'Total Reps'
+        dataByDate = {}
+        exSessions.forEach(s => {
+          if (s.reps) dataByDate[s.session_date] = (dataByDate[s.session_date] || 0) + parseInt(s.reps)
+        })
+      } else {
+        // Y = max weight_kg per session date
+        yLabel = 'Berat Maks (kg)'
+        dataByDate = {}
+        exSessions.forEach(s => {
+          const w = parseFloat(s.weight_kg)
+          if (w && (!dataByDate[s.session_date] || w > dataByDate[s.session_date])) {
+            dataByDate[s.session_date] = w
+          }
+        })
+      }
+
+      const dates  = Object.keys(dataByDate).sort()
       const labels = dates.map(d => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day:'numeric', month:'short' }))
-      const values = dates.map(d => exData[d])
+      const values = dates.map(d => dataByDate[d])
 
       if (progressChart) progressChart.destroy()
       progressChart = new Chart(document.getElementById('progressChart').getContext('2d'), {
@@ -298,7 +353,7 @@
         data: {
           labels,
           datasets: [{
-            label: `${exName} — max kg`,
+            label: `${exName} — ${yLabel}`,
             data: values,
             borderColor: '#E63030',
             backgroundColor: 'rgba(230,48,48,0.07)',
@@ -313,7 +368,11 @@
           responsive: true,
           plugins: { legend: { display: false } },
           scales: {
-            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', font: { size: 11 } } },
+            y: {
+              title: { display: true, text: yLabel, color: '#888', font: { size: 11 } },
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: { color: '#888', font: { size: 11 } }
+            },
             x: { grid: { display: false }, ticks: { color: '#888', font: { size: 10 }, maxTicksLimit: 8 } }
           }
         }

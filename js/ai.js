@@ -21,13 +21,42 @@ const PROVIDERS = {
   }
 }
 
-// ── Build prompt dari data workout
+// ── Build prompt dari data workout (split by type)
 export function buildPrompt(workoutData, bodyWeightData, period, fatigueText = '') {
+  // Separate strength/plyometric from cardio
+  const strengthData = workoutData.filter(s => !s.duration_min && s.reps != null)
+  const cardioData   = workoutData.filter(s => s.duration_min != null)
+
+  // Group strength by session_date + exercise_name
+  const strengthGrouped = {}
+  strengthData.forEach(s => {
+    const key = `${s.session_date}__${s.exercise_name}`
+    if (!strengthGrouped[key]) {
+      strengthGrouped[key] = { exercise_name: s.exercise_name, session_date: s.session_date, sets: [] }
+    }
+    strengthGrouped[key].sets.push({
+      set_number: s.set_number,
+      reps: s.reps,
+      weight_kg: s.weight_kg
+    })
+  })
+
+  // Format cardio entries
+  const cardioFormatted = cardioData.map(s => ({
+    exercise_name: s.exercise_name,
+    session_date: s.session_date,
+    duration_min: s.duration_min,
+    distance_km: s.distance_km || null
+  }))
+
   return `
 Analisis data latihan berikut untuk periode ${period}:
 
-=== DATA WORKOUT ===
-${JSON.stringify(workoutData, null, 2)}
+=== DATA WORKOUT STRENGTH ===
+${JSON.stringify(Object.values(strengthGrouped), null, 2)}
+
+=== DATA WORKOUT CARDIO ===
+${JSON.stringify(cardioFormatted, null, 2)}
 
 === DATA BERAT BADAN ===
 ${JSON.stringify(bodyWeightData, null, 2)}
